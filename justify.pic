@@ -1,0 +1,531 @@
+#! piccolo
+
+import 'io' as io
+import 'file' as file
+import 'math' as math
+import 'os' as os
+
+const newline = '
+'
+
+const isWhitespace = fn c ->
+    c == ' ' or c == newline or c == '  '
+
+const isSingleCharToken = fn c ->
+    c == '+' or c == '-' or c == '*' or c == '/' or c == '=' or c == '<' or c == '>' or c == ',' or c == '&' or c == '|' or
+    c == '(' or c == ')'
+
+const isAlpha = fn c ->
+    c == 'a' or c == 'A' or
+    c == 'b' or c == 'B' or
+    c == 'c' or c == 'C' or
+    c == 'd' or c == 'D' or
+    c == 'e' or c == 'E' or
+    c == 'f' or c == 'F' or
+    c == 'g' or c == 'G' or
+    c == 'h' or c == 'H' or
+    c == 'i' or c == 'I' or
+    c == 'j' or c == 'J' or
+    c == 'k' or c == 'K' or
+    c == 'l' or c == 'L' or
+    c == 'm' or c == 'M' or
+    c == 'n' or c == 'N' or
+    c == 'o' or c == 'O' or
+    c == 'p' or c == 'P' or
+    c == 'q' or c == 'Q' or
+    c == 'r' or c == 'R' or
+    c == 's' or c == 'S' or
+    c == 't' or c == 'T' or
+    c == 'u' or c == 'U' or
+    c == 'v' or c == 'V' or
+    c == 'w' or c == 'W' or
+    c == 'x' or c == 'X' or
+    c == 'y' or c == 'Y' or
+    c == 'z' or c == 'Z'
+
+const digits = {
+    '0': 0,
+    '1': 1,
+    '2': 2,
+    '3': 3,
+    '4': 4,
+    '5': 5,
+    '6': 6,
+    '7': 7,
+    '8': 8,
+    '9': 9
+}
+
+const isNum = fn c ->
+    c in digits
+
+const isAlphaNum = fn c ->
+    isAlpha(c) or isNum(c)
+
+const isKeyword = fn identifier ->
+    identifier == 'because' or identifier == 'scream' or identifier == 'end' or
+    identifier == 'howMuch' or identifier == 'whisper' or identifier == 'pop' or
+    identifier == 'popped' or identifier == 'tear' or identifier == 'whatDidYouSay'
+
+const isInvalidChar = fn c ->
+    !isWhitespace(c) and !isSingleCharToken(c) and !isAlpha(c) and !isNum(c)
+
+const digitsList = '0123456789'
+const numToStrLoop = fn x -> {
+    if x == 0
+        ''
+    else
+        numToStrLoop(math.floor(x / 10)) + digitsList[x % 10]
+}
+
+const numToStr = fn x ->
+    if x == 0
+        '0'
+    else
+        numToStrLoop(x)
+
+const parseFile = fn path -> {
+
+    const sourceFile = file.open(path, 'r')
+    var currToken = nil
+
+    var hadError = false
+    const parsingError = fn line, msg -> {
+        hadError = true
+        io.print('[line ' + numToStr(line) + '] ' + msg)
+    }
+
+    var currChar = nil
+    var currLine = 1
+    const nextChar = fn -> {
+        currChar = sourceFile.readChar()
+        if currChar == newline
+            currLine = currLine + 1
+    }
+    nextChar()
+    const advance = fn -> {
+        while currChar != nil and (isInvalidChar(currChar) or isWhitespace(currChar) or currChar == ';') {
+            if currChar == ';' {
+                while currChar != nil and currChar != newline {
+                    nextChar()
+                }
+            } else if isInvalidChar(currChar) {
+                parsingError(currLine, 'unexpected character "' + currChar + '"')
+            }
+            nextChar()
+        }
+        
+        if currChar == nil {
+            currToken = {
+                'type': 'eof',
+                'line': currLine
+            }
+        } else if isSingleCharToken(currChar) {
+            currToken = {
+                'type': currChar,
+                'line': currLine
+            }
+            nextChar()
+        } else if isAlpha(currChar) {
+            currToken = {
+                'type': 'identifier',
+                'value': currChar,
+                'line': currLine
+            }
+            nextChar()
+            while isAlphaNum(currChar) {
+                currToken.value = currToken.value + currChar
+                nextChar()
+            }
+            if isKeyword(currToken.value) {
+                currToken.type = currToken.value
+            }
+        } else if isNum(currChar) {
+            currToken = {
+                'type': 'number',
+                'value': digits[currChar],
+                'line': currLine
+            }
+            nextChar()
+            while isNum(currChar) {
+                currToken.value = currToken.value * 10 + digits[currChar]
+                nextChar()
+            }
+        }
+    }
+    advance()
+
+    var parseExpr = nil
+
+    const parseLiteral = fn -> {
+        if currToken.type == 'number' {
+            const num = currToken.value
+            advance()
+
+            {
+                'type': 'number',
+                'value': num
+            }
+        } else if currToken.type == 'identifier' {
+            const name = currToken.value
+            const line = currToken.line
+            advance()
+
+            {
+                'type': 'var',
+                'name': name,
+                'line': line
+            }
+        } else if currToken.type == 'howMuch' {
+            advance()
+            {
+                'type': 'howMuch'
+            }
+        } else if currToken.type == 'whatDidYouSay' {
+            advance()
+            {
+                'type': 'whatDidYouSay'
+            }
+        } else if currToken.type == '(' {
+            advance()
+            const expr = parseExpr()
+            if currToken.type == ')' {
+                advance()
+            } else {
+                parsingError(currToken.line, 'expected ).')
+            }
+            expr
+        } else {
+            parsingError(currToken.line, 'expected expression')
+            nil
+        }
+    }
+
+    const parsePopped = fn -> {
+        if currToken.type == 'popped' {
+            const line = currToken.line
+            advance()
+            const x = parseExpr()
+            if currToken.type == ',' {
+                advance()
+            } else {
+                parsingError(currToken.line, 'expected comma.')
+            }
+            const y = parseExpr()
+
+            {
+                'type': 'popped',
+                'x': x,
+                'y': y,
+                'line': line
+            }
+        } else {
+            parseLiteral()
+        }
+    }
+
+    const parseMultiplicative = fn -> {
+        var left = parsePopped()
+        while currToken.type == '*' or currToken.type == '/' {
+            const op = currToken.type
+            advance()
+            left = {
+                'type': 'binary',
+                'left': left,
+                'op': op,
+                'right': parsePopped()
+            }
+        }
+        left
+    }
+
+    const parseAdditive = fn -> {
+        var left = parseMultiplicative()
+        while currToken.type == '+' or currToken.type == '-' {
+            const op = currToken.type
+            advance()
+            left = {
+                'type': 'binary',
+                'left': left,
+                'op': op,
+                'right': parseMultiplicative()
+            }
+        }
+        left
+    }
+
+    const parseComparison = fn -> {
+        var left = parseAdditive()
+        while currToken.type == '=' or currToken.type == '>' or currToken.type == '<' {
+            const op = currToken.type
+            advance()
+            left = {
+                'type': 'binary',
+                'left': left,
+                'op': op,
+                'right': parseAdditive()
+            }
+            if op == '='
+                left.op = '=='
+        }
+        left
+    }
+
+    const parseBinary = fn -> {
+        var left = parseComparison()
+        while currToken.type == '&' or currToken.type == '|' {
+            const op = currToken.type
+            advance()
+            left = {
+                'type': 'binary',
+                'left': left,
+                'op': op,
+                'right': parseComparison()
+            }
+        }
+        left
+    }
+
+    parseExpr = fn -> {
+        parseBinary()
+    }
+
+    const parseStmt = fn -> {
+        if currToken.type == 'identifier' {
+            const name = currToken.value
+            advance()
+            if currToken.type == '=' {
+                advance()
+            } else {
+                parsingError(currToken.line, 'expected =.')
+            }
+
+            {
+                'type': 'set',
+                'name': name,
+                'value': parseExpr()
+            }
+        } else if currToken.type == 'scream' {
+            advance()
+            {
+                'type': 'scream',
+                'value': parseExpr()
+            }
+        } else if currToken.type == 'whisper' {
+            advance()
+            {
+                'type': 'whisper',
+                'value': parseExpr()
+            }
+        } else if currToken.type == 'end' {
+            advance()
+            {
+                'type': 'end'
+            }
+        } else if currToken.type == 'pop' {
+            const line = currToken.line
+            advance()
+            const x = parseExpr()
+            if currToken.type == ',' {
+                advance()
+            } else {
+                parsingError(currToken.line, 'expected comma.')
+            }
+            const y = parseExpr()
+            {
+                'type': 'pop',
+                'x': x,
+                'y': y,
+                'line': line
+            }
+        } else if currToken.type == 'tear' {
+            const line = currToken.line
+            advance()
+            {
+                'type': 'tear',
+                'bubbles': parseExpr(),
+                'line': line
+            }
+        } else {
+            parsingError(currToken.line, 'expected statement.')
+            advance()
+        }
+    }
+
+    const parse = fn -> {
+        var stmt = parseStmt()
+        if currToken.type == 'because' {
+            advance()
+            stmt = {
+                'type': 'conditional',
+                'stmt': stmt,
+                'condition': parseExpr()
+            }
+        }
+        stmt
+    }
+
+    const ast = while currToken.type != 'eof' {
+        parse()
+    }
+
+    sourceFile.close()
+
+    if hadError
+        nil
+    else
+        ast
+}
+
+const compile = fn inPath, outPath -> {
+    var ast = parseFile(inPath)
+    const outFile = file.open(outPath + '.c', 'w')
+
+    var hadError = false
+
+    if ast == nil {
+        ast = []
+        hadError = true
+    }
+
+    const compileError = fn line, msg -> {
+        io.print('[line ' + numToStr(line) + '] ' + msg)
+        hadError = true
+    }
+
+    const vars = {}
+
+    for stmt in ast {
+        if stmt.type == 'set'
+            vars[stmt.name] = true
+        if stmt.type == 'conditional'
+            if stmt.stmt.type == 'set'
+                vars[stmt.stmt.name] = true
+    }
+
+    var compileExpr = nil
+    compileExpr = fn expr -> {
+        if expr.type == 'number'
+            numToStr(expr.value)
+        else if expr.type == 'binary'
+            '(' + compileExpr(expr.left) + ' ' + expr.op + ' ' + compileExpr(expr.right) + ')'
+        else if expr.type == 'var' {
+            if !(expr.name in vars)
+                compileError(expr.line, 'undefined variable "' + expr.name + '"')
+            expr.name
+        } else if expr.type == 'howMuch'
+            'howMuch()'
+        else if expr.type == 'whatDidYouSay'
+            'whatDidYouSay()'
+        else if expr.type == 'popped'
+            'popped(' + compileExpr(expr.x) + ', ' + compileExpr(expr.y) + ', ' + numToStr(expr.line) + ')'
+    }
+
+    var compileStmt = nil
+    compileStmt = fn stmt -> {
+        if stmt.type == 'set'
+            stmt.name + ' = ' + compileExpr(stmt.value) + ';'
+        else if stmt.type == 'scream'
+            '{printf("%d", ' + compileExpr(stmt.value) + '); fflush(stdout);}'
+        else if stmt.type == 'whisper'
+            '{printf("%c", ' + compileExpr(stmt.value) + '); fflush(stdout);}'
+        else if stmt.type == 'end'
+            'goto end_;'
+        else if stmt.type == 'pop'
+            'pop(' + compileExpr(stmt.x) + ', ' + compileExpr(stmt.y) + ', ' + numToStr(stmt.line) + ');'
+        else if stmt.type == 'tear'
+            'tear(' + compileExpr(stmt.bubbles) + ', ' + numToStr(stmt.line) + ');'
+        else if stmt.type == 'conditional'
+            'if(' + compileExpr(stmt.condition) + ') ' + compileStmt(stmt.stmt)
+    }
+
+    outFile.write('
+#include <stdio.h>
+#include <stdint.h>
+#include <stdbool.h>
+#include <stdlib.h>
+
+#define BUBBLE_WRAP_W 64
+#define BUBBLE_WRAP_H 32768
+bool bubbleWrap_[BUBBLE_WRAP_W][BUBBLE_WRAP_H];
+
+int64_t howMuch() {
+    int input;
+    scanf("%d", &input);
+    return input;
+}
+
+int64_t whatDidYouSay() {
+    return fgetc(stdin);
+}
+
+void pop(int x, int y, int line) {
+    if(x < 0 || x >= BUBBLE_WRAP_W || y < 0 || y >= BUBBLE_WRAP_H) {
+        fprintf(stderr, "[line %d] bubble wrap coords [%d, %d] out of bounds.\n", line, x, y);
+        exit(1);
+    }
+    bubbleWrap_[x][y] = true;
+}
+
+bool popped(int x, int y, int line) {
+    if(x < 0 || x >= BUBBLE_WRAP_W || y < 0 || y >= BUBBLE_WRAP_H) {
+        fprintf(stderr, "[line %d] bubble wrap coords [%d, %d] out of bounds.\n", line, x, y);
+        exit(1);
+    }
+    return bubbleWrap_[x][y];
+}
+
+void tear(int bubbles, int line) {
+    if(bubbles >= BUBBLE_WRAP_H) {
+        fprintf(stderr, "[line %d] cannot tear %d rows.\n", line, bubbles);
+        exit(1);
+    }
+    for(int i = 0; i < BUBBLE_WRAP_W; i++) {
+        for(int j = 0; j < BUBBLE_WRAP_H - bubbles; j++)
+            bubbleWrap_[i][j] = bubbleWrap_[i][j + bubbles];
+        for(int j = BUBBLE_WRAP_H - bubbles; j < BUBBLE_WRAP_H; j++)
+            bubbleWrap_[i][j] = false;
+    }
+}
+
+int main() {')
+
+    for name in vars {
+        outFile.write('
+    int64_t ' + name + ' = 0;')
+    }
+
+    outFile.write('
+
+    for(int x = 0; x < BUBBLE_WRAP_W; x++) {
+        for(int y = 0; y < BUBBLE_WRAP_H; y++) {
+            bubbleWrap_[x][y] = false;
+        }
+    }
+
+    while(true) {')
+
+    for stmt in ast {
+        outFile.write('
+        ' + compileStmt(stmt))
+    }
+
+    outFile.write('
+    }
+
+    end_:
+
+    return 0;
+}
+')
+
+    outFile.close()
+    
+    if !hadError
+        os.shell('gcc -o ' + outPath + ' ' + outPath + '.c > /dev/null 2>&1')
+    os.shell('rm ' + outPath + '.c')
+    if !hadError
+        os.shell('./' + outPath)
+}
+
+compile('brainf.just', 'build/brainf')
